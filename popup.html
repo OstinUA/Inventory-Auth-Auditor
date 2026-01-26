@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ads.txt Line Validator</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background-color: #1e1e1e;
+      color: #e0e0e0;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h2 {
+      color: #ffffff;
+      margin-top: 0;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .row {
+      display: flex;
+      gap: 20px;
+    }
+
+    .col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    label {
+      font-weight: 600;
+      margin-bottom: 5px;
+      color: #ffffff;
+    }
+
+    textarea {
+      background-color: #2d2d2d;
+      color: #ffffff;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px;
+      height: 200px;
+      font-family: monospace;
+      resize: vertical;
+    }
+
+    textarea:focus {
+      border-color: #21aeb3;
+      outline: none;
+    }
+
+    .settings-bar {
+      background-color: #2d2d2d;
+      padding: 15px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      border: 1px solid #444;
+    }
+
+    select, input[type="text"] {
+      background-color: #1e1e1e;
+      color: white;
+      border: 1px solid #444;
+      padding: 5px;
+      border-radius: 4px;
+    }
+
+    button {
+      background-color: #21aeb3;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background-color: #1a8a8e;
+    }
+
+    button:disabled {
+      background-color: #444;
+      cursor: not-allowed;
+    }
+
+    .status-bar {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    .table-wrapper {
+      margin-top: 20px;
+      overflow-x: auto;
+      background: #2d2d2d;
+      border-radius: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px;
+      text-align: left;
+      border-bottom: 1px solid #444;
+    }
+
+    th {
+      background-color: #383838;
+      color: #fff;
+      position: sticky;
+      top: 0;
+    }
+
+    .status-valid { color: #21aeb3; font-weight: bold; }
+    .status-partial { color: #f1c40f; font-weight: bold; }
+    .status-error { color: #e74c3c; font-weight: bold; }
+    .status-missing { color: #95a5a6; }
+
+    #downloadBtn {
+      background-color: #27ae60;
+      display: none;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Ads.txt / App-ads.txt Line Checker</h2>
+
+  <div class="container">
+    
+    <div class="settings-bar">
+      <div>
+        <label>File Type:</label>
+        <select id="fileType">
+          <option value="app-ads.txt">app-ads.txt</option>
+          <option value="ads.txt">ads.txt</option>
+        </select>
+      </div>
+      <div>
+        <label>Filter:</label>
+        <select id="viewMode">
+          <option value="all">Show All Results</option>
+          <option value="errors">Errors / Warnings Only</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <label>Target Websites (One per line)</label>
+        <textarea id="targetList" placeholder="example.com&#10;mysite.org"></textarea>
+      </div>
+      <div class="col">
+        <label>Reference Lines (Domain, ID, Type)</label>
+        <textarea id="refList" placeholder="google.com, pub-123456789, DIRECT&#10;appnexus.com, 1234, RESELLER"></textarea>
+      </div>
+    </div>
+
+    <button id="runBtn">Start Validation</button>
+    <div class="status-bar" id="statusText">Ready</div>
+    
+    <div class="table-wrapper">
+      <table id="resultsTable">
+        <thead>
+          <tr>
+            <th>Target URL</th>
+            <th>Reference (Rule)</th>
+            <th>Result</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <button id="downloadBtn">Download CSV</button>
+
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

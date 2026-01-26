@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Ads.txt/App-ads.txt line Valid-checker",
+  "version": "1.0",
+  "description": "Validate specific ads.txt/app-ads.txt lines across multiple domains | adWMG / by Ostin",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Line Valid-checker",
+    "default_icon": {
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}
