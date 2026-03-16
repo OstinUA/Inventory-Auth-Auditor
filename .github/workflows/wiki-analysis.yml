@@ -236,7 +236,7 @@ jobs:
           ]
 
           for page in pages:
-              display = page.replace("-", " ")р
+              display = page.replace("-", " ")
               desc = descriptions.get(page, "")
               lines.append(f"| [{display}]({page}) | {desc} |")
 
