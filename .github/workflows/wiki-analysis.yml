@@ -36,7 +36,24 @@ jobs:
 
       - run: pip install requests
 
+      - name: Check if page exists
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOPIC: ${{ github.event.inputs.topic }}
+          REPO: ${{ github.repository }}
+        run: |
+          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.wiki.git" /tmp/wiki_check
+          if [ -f "/tmp/wiki_check/${TOPIC}.md" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Page '${TOPIC}' already exists, skipping."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Page '${TOPIC}' not found, will generate."
+          fi
+
       - name: Collect repo files
+        if: steps.check.outputs.exists == 'false'
         run: |
           python - <<'EOF'
           import os, json
@@ -65,23 +82,20 @@ jobs:
           EOF
 
       - name: Generate wiki page via Gemini
+        if: steps.check.outputs.exists == 'false'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           REPO: ${{ github.repository }}
-          COMMIT_SHA: ${{ github.sha }}
           TOPIC: ${{ github.event.inputs.topic }}
         run: |
           python - <<'EOF'
           import os, json, requests, time
-          from datetime import datetime, timezone
 
           with open('/tmp/repo_files.json') as f:
               files = json.load(f)
 
           repo = os.environ['REPO']
-          commit_sha = os.environ['COMMIT_SHA']
           topic = os.environ['TOPIC']
-          generated_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
 
           topic_filters = {
               "Architecture":            None,
@@ -167,15 +181,14 @@ jobs:
               print("All models failed")
               exit(1)
 
-          footer = f"\n\n---\n*Generated from [{commit_sha[:7]}](https://github.com/{repo}/commit/{commit_sha}) · {generated_at}*"
-
           with open('/tmp/wiki_page.md', 'w') as f:
-              f.write(result + footer)
+              f.write(result)
 
           print(f"Page generated for topic: {topic}")
           EOF
 
       - name: Push page and update Home
+        if: steps.check.outputs.exists == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TOPIC: ${{ github.event.inputs.topic }}
@@ -184,16 +197,14 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
 
-          git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.wiki.git" /tmp/wiki
-          cd /tmp/wiki
+          cp /tmp/wiki_page.md "/tmp/wiki_check/${TOPIC}.md"
 
-          cp /tmp/wiki_page.md "${TOPIC}.md"
-
-          python3 - <<'PYEOF'
+          REPO="${REPO}" python3 - <<'PYEOF'
           import os
 
-          wiki_dir = "/tmp/wiki"
+          wiki_dir = "/tmp/wiki_check"
           home_file = os.path.join(wiki_dir, "Home.md")
+          repo = os.environ['REPO']
 
           pages = sorted([
               f[:-3] for f in os.listdir(wiki_dir)
@@ -225,7 +236,7 @@ jobs:
           ]
 
           for page in pages:
-              display = page.replace("-", " ")
+              display = page.replace("-", " ")р
               desc = descriptions.get(page, "")
               lines.append(f"| [{display}]({page}) | {desc} |")
 
@@ -236,8 +247,8 @@ jobs:
               f"![pages](https://img.shields.io/badge/pages-{len(pages)}-blue?style=flat-square)",
               "[![auto](https://img.shields.io/badge/generated-OstinUA-purple?style=flat-square)](https://github.com/OstinUA)",
               "![wiki](https://img.shields.io/badge/wiki-up--to--date-green?style=flat-square)",
-              f"![last commit](https://img.shields.io/github/last-commit/{os.environ.get('REPO', '')}?style=flat-square)",
-              f"![issues](https://img.shields.io/github/issues/{os.environ.get('REPO', '')}?style=flat-square)",
+              f"![last commit](https://img.shields.io/github/last-commit/{repo}?style=flat-square)",
+              f"![issues](https://img.shields.io/github/issues/{repo}?style=flat-square)",
           ]
 
           with open(home_file, "w") as f:
@@ -246,6 +257,7 @@ jobs:
           print(f"Home updated with {len(pages)} pages")
           PYEOF
 
+          cd /tmp/wiki_check
           git add .
           git diff --cached --quiet && exit 0
           git commit -m "wiki: add ${TOPIC} + update Home"
