@@ -16,6 +16,8 @@ on:
           - API-Reference
           - Troubleshooting
           - Changelog
+          - Environment-Variables
+          - GitHub-Actions-Pipeline
 
 jobs:
   analyze:
@@ -52,7 +54,7 @@ jobs:
                   path = os.path.join(root, fname).lstrip('./')
                   try:
                       with open(os.path.join(root, fname), 'r', encoding='utf-8', errors='ignore') as f:
-                          content = f.read(3000)
+                          content = f.read(1500)
                       files[path] = content
                   except:
                       pass
@@ -65,44 +67,70 @@ jobs:
       - name: Generate wiki page via Gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
           TOPIC: ${{ github.event.inputs.topic }}
         run: |
           python - <<'EOF'
           import os, json, requests, time
+          from datetime import datetime, timezone
 
           with open('/tmp/repo_files.json') as f:
               files = json.load(f)
 
+          repo = os.environ['REPO']
+          commit_sha = os.environ['COMMIT_SHA']
+          topic = os.environ['TOPIC']
+          generated_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+          topic_filters = {
+              "Architecture":            None,
+              "Setup-and-Configuration": None,
+              "How-It-Works":            None,
+              "Security":                None,
+              "Contributing":            None,
+              "API-Reference":           {'.py'},
+              "Troubleshooting":         None,
+              "Changelog":               {'.md'},
+              "Environment-Variables":   {'.py', '.yml', '.yaml'},
+              "GitHub-Actions-Pipeline": {'.yml', '.yaml'},
+          }
+
+          topic_prompts = {
+              "Architecture":            "Describe the project architecture: key files, how they interact, data flow, design decisions.",
+              "Setup-and-Configuration": "Prerequisites, installation steps, all env variables and secrets with explanations.",
+              "How-It-Works":            "Step-by-step runtime flow: triggers, logic, API calls, outputs.",
+              "Security":                "What secrets are used, how auth works, potential risks, recommendations.",
+              "Contributing":            "How to run locally, code style, PR process, testing.",
+              "API-Reference":           "All external APIs used: endpoints, payloads, response formats, error handling.",
+              "Troubleshooting":         "Common problems and solutions based on the codebase logic.",
+              "Changelog":               "Key features and changes as a changelog-style entry.",
+              "Environment-Variables":   "Full reference of every env var: name, purpose, example value, required or optional.",
+              "GitHub-Actions-Pipeline": "How the CI/CD pipeline works: triggers, jobs, steps, secrets injection, permissions.",
+          }
+
+          exts = topic_filters.get(topic)
           file_dump = ""
           for path, content in files.items():
+              if exts and os.path.splitext(path)[1] not in exts:
+                  continue
               file_dump += f"\n\n### {path}\n```\n{content}\n```"
-              if len(file_dump) > 80000:
+              if len(file_dump) > 40000:
                   file_dump += "\n\n[truncated...]"
                   break
 
-          topic = os.environ['TOPIC']
-
-          topic_prompts = {
-              "Architecture": "Describe the project architecture: key files, how they interact, data flow, design decisions. No fluff.",
-              "Setup-and-Configuration": "Describe how to set up the project: prerequisites, installation steps, all env variables and secrets with explanations.",
-              "How-It-Works": "Explain step-by-step how the system works at runtime: triggers, logic flow, API calls, outputs.",
-              "Security": "Analyze security aspects: what secrets are used, how auth works, potential risks, recommendations.",
-              "Contributing": "Write a contributing guide: how to run locally, code style, PR process, testing.",
-              "API-Reference": "Document all external APIs used: endpoints, payloads, response formats, error handling.",
-              "Troubleshooting": "List common problems and their solutions based on the codebase logic.",
-              "Changelog": "Summarize what this project does and list key features as a changelog-style entry.",
-          }
-
           instruction = topic_prompts.get(topic, "Write a focused wiki page about this topic.")
 
-          prompt = f"""Write a GitHub Wiki page about "{topic}" for this repository.
+          prompt = f"""Repository: {repo}
+
+          Write a GitHub Wiki page about "{topic}".
 
           Instructions: {instruction}
 
           Rules:
           - Max 400 words
           - Use markdown headers (##, ###)
-          - Be specific to THIS codebase, not generic
+          - Be specific to THIS repository ({repo}), not generic
           - No intro like "This page covers..." — start directly with content
           - Do not repeat the page title as H1
 
@@ -121,10 +149,13 @@ jobs:
                   try:
                       resp = requests.post(url, json=payload, headers=headers, timeout=120)
                       if resp.status_code == 429:
-                          time.sleep(15 * (2 ** attempt))
+                          wait = 15 * (2 ** attempt)
+                          print(f"Rate limited, waiting {wait}s...")
+                          time.sleep(wait)
                           continue
                       resp.raise_for_status()
                       result = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                      print(f"Success with {model}")
                       break
                   except Exception as e:
                       print(f"[{model}] attempt {attempt+1} failed: {e}")
@@ -133,13 +164,18 @@ jobs:
                   break
 
           if not result:
+              print("All models failed")
               exit(1)
 
+          footer = f"\n\n---\n*Generated from [{commit_sha[:7]}](https://github.com/{repo}/commit/{commit_sha}) · {generated_at}*"
+
           with open('/tmp/wiki_page.md', 'w') as f:
-              f.write(result)
+              f.write(result + footer)
+
+          print(f"Page generated for topic: {topic}")
           EOF
 
-      - name: Push page and update Table of Contents
+      - name: Push page and update Home
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TOPIC: ${{ github.event.inputs.topic }}
@@ -157,26 +193,30 @@ jobs:
           import os
 
           wiki_dir = "/tmp/wiki"
-          toc_file = os.path.join(wiki_dir, "Table-of-Contents.md")
+          home_file = os.path.join(wiki_dir, "Home.md")
 
           pages = sorted([
               f[:-3] for f in os.listdir(wiki_dir)
-              if f.endswith(".md") and f != "Table-of-Contents.md"
+              if f.endswith(".md") and f != "Home.md"
           ])
 
-          lines = ["# Table of Contents\n"]
-          lines.append("_Auto-generated index of all wiki pages._\n")
-          lines.append("")
-
+          lines = [
+              "# Wiki",
+              "",
+              "_Auto-generated index of all wiki pages._",
+              "",
+          ]
           for page in pages:
               display = page.replace("-", " ")
               lines.append(f"- [{display}]({page})")
 
-          with open(toc_file, "w") as f:
+          with open(home_file, "w") as f:
               f.write("\n".join(lines))
+
+          print(f"Home updated with {len(pages)} pages")
           PYEOF
 
           git add .
           git diff --cached --quiet && exit 0
-          git commit -m "wiki: add ${TOPIC} + update Table of Contents"
+          git commit -m "wiki: add ${TOPIC} + update Home"
           git push
