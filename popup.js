@@ -13,11 +13,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const tableBody = document.querySelector('#resultsTable tbody');
   const progressBar = document.getElementById('progressBar');
   const progressContainer = document.getElementById('progressContainer');
+  const targetLabel = document.getElementById('targetLabel');
 
   let globalResults = [];
   let aborted = false;
 
   loadState();
+  updatePlaceholder();
 
   function saveState() {
     chrome.storage.local.set({
@@ -36,12 +38,24 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.fileType) fileTypeSel.value = data.fileType;
       if (data.viewMode) viewModeSel.value = data.viewMode;
       if (data.batchSize) batchSizeSel.value = data.batchSize;
+      updatePlaceholder();
     });
+  }
+
+  function updatePlaceholder() {
+    const mode = fileTypeSel.value;
+    if (mode === 'url') {
+      targetLabel.textContent = 'Target URLs (direct links)';
+      targetList.placeholder = 'https://rakuten.com/app-ads.txt\nhttps://www.voodoo.io/app-ads.txt\npicsart.com/app-ads.txt';
+    } else {
+      targetLabel.textContent = 'Target Websites';
+      targetList.placeholder = 'example.com\nanother-site.com';
+    }
   }
 
   targetList.addEventListener('input', saveState);
   refList.addEventListener('input', saveState);
-  fileTypeSel.addEventListener('change', saveState);
+  fileTypeSel.addEventListener('change', () => { saveState(); updatePlaceholder(); });
   viewModeSel.addEventListener('change', () => { saveState(); renderTable(); });
   batchSizeSel.addEventListener('change', saveState);
 
@@ -115,6 +129,65 @@ document.addEventListener('DOMContentLoaded', () => {
     return d;
   }
 
+  function buildUrlFromInput(input) {
+    let url = input.trim();
+    if (!url) return null;
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
+    }
+    return url;
+  }
+
+  function getDisplayName(input, mode) {
+    if (mode === 'url') {
+      return input.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+    }
+    return parseDomain(input) || input.trim();
+  }
+
+  async function processDirectUrl(rawUrl, references) {
+    const url = buildUrlFromInput(rawUrl);
+    const display = getDisplayName(rawUrl, 'url');
+
+    if (!url) {
+      references.forEach(ref => {
+        globalResults.push({ target: display || rawUrl.trim(), reference: ref.original, status: "Error", details: "Invalid URL", owner: "", isError: true });
+      });
+      return;
+    }
+
+    let result = null;
+    let error = "Unreachable";
+
+    try {
+      result = await fetchWithRetry(url);
+    } catch (e) {
+      if (/^https:\/\//i.test(url)) {
+        try {
+          result = await fetchWithRetry(url.replace(/^https:\/\//i, 'http://'));
+        } catch (e2) {
+          error = e2.message === 'Aborted' ? 'Aborted' : (e2.message.startsWith('HTTP') ? e2.message : "Connection Error");
+        }
+      } else {
+        error = e.message === 'Aborted' ? 'Aborted' : (e.message.startsWith('HTTP') ? e.message : "Connection Error");
+      }
+    }
+
+    if (result && isLikelyNotPlainText(result.text, result.contentType)) {
+      result = null;
+      error = "Soft 404 / Not a text file";
+    }
+
+    if (!result) {
+      references.forEach(ref => {
+        globalResults.push({ target: display, reference: ref.original, status: "Error", details: error, owner: "", isError: true });
+      });
+      return;
+    }
+
+    processFileContent(result.text, display, references);
+  }
+
   async function processDomain(domain, filename, references) {
     const cleanDomain = parseDomain(domain);
     if (!cleanDomain) {
@@ -149,7 +222,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const content = result.text;
+    processFileContent(result.text, cleanDomain, references);
+  }
+
+  function processFileContent(content, targetDisplay, references) {
     const ownerMatch = content.match(/OWNERDOMAIN\s*=\s*([^\s#]+)/i);
     const managerMatch = content.match(/MANAGERDOMAIN\s*=\s*([^\s#]+)/i);
     const owner = ownerMatch ? ownerMatch[1].toLowerCase() : '';
@@ -180,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     references.forEach(ref => {
       const match = lines.find(l => l.d === ref.domain && l.i === ref.id);
-      let res = { target: cleanDomain, reference: ref.original, status: "Not Found", details: "Missing", owner: ownerDisplay, isError: true };
+      let res = { target: targetDisplay, reference: ref.original, status: "Not Found", details: "Missing", owner: ownerDisplay, isError: true };
 
       if (match) {
         const key = `${match.d}|${match.i}|${match.t}`;
@@ -233,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
   runBtn.addEventListener('click', async () => {
     const targets = targetList.value.split('\n').map(l => l.trim()).filter(l => l);
     const rawRefs = refList.value.split('\n').map(l => l.trim()).filter(l => l);
+    const mode = fileTypeSel.value;
 
     if (targets.length === 0 || rawRefs.length === 0) {
       statusText.innerText = 'Please fill in both fields.';
@@ -268,7 +345,13 @@ document.addEventListener('DOMContentLoaded', () => {
     for (let i = 0; i < targets.length; i += BATCH_SIZE) {
       if (aborted) break;
       const batch = targets.slice(i, i + BATCH_SIZE);
-      await Promise.all(batch.map(t => processDomain(t, fileTypeSel.value, references)));
+
+      if (mode === 'url') {
+        await Promise.all(batch.map(t => processDirectUrl(t, references)));
+      } else {
+        await Promise.all(batch.map(t => processDomain(t, mode, references)));
+      }
+
       const done = Math.min(i + batch.length, targets.length);
       const percent = Math.round((done / targets.length) * 100);
       progressBar.style.width = `${percent}%`;
