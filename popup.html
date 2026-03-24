@@ -25,6 +25,13 @@
         </select>
       </div>
       <div>
+        <label>Layout:</label>
+        <select id="tableLayout">
+          <option value="standard">Standard</option>
+          <option value="grouped">Grouped by Target</option>
+        </select>
+      </div>
+      <div>
         <label>Batch Size:</label>
         <select id="batchSize">
           <option value="2">2</option>
@@ -55,7 +62,7 @@
     <div class="stats-bar" id="statsBar"></div>
     <div class="table-wrapper">
       <table id="resultsTable">
-        <thead>
+        <thead id="resultsHead">
           <tr>
             <th>Target URL</th>
             <th>Reference</th>

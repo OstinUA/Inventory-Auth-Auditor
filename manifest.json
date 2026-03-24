@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ads.txt/App-ads.txt line Valid-checker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Validate ads.txt/app-ads.txt lines with retry logic and enhanced parsing | adWMG",
   "permissions": ["storage"],
   "host_permissions": [

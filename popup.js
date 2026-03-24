@@ -7,9 +7,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const refList = document.getElementById('refList');
   const fileTypeSel = document.getElementById('fileType');
   const viewModeSel = document.getElementById('viewMode');
+  const tableLayoutSel = document.getElementById('tableLayout');
   const batchSizeSel = document.getElementById('batchSize');
   const statusText = document.getElementById('statusText');
   const statsBar = document.getElementById('statsBar');
+  const resultsHead = document.getElementById('resultsHead');
   const tableBody = document.querySelector('#resultsTable tbody');
   const progressBar = document.getElementById('progressBar');
   const progressContainer = document.getElementById('progressContainer');
@@ -27,16 +29,18 @@ document.addEventListener('DOMContentLoaded', () => {
       refs: refList.value,
       fileType: fileTypeSel.value,
       viewMode: viewModeSel.value,
+      tableLayout: tableLayoutSel.value,
       batchSize: batchSizeSel.value
     });
   }
 
   function loadState() {
-    chrome.storage.local.get(['targets', 'refs', 'fileType', 'viewMode', 'batchSize'], (data) => {
+    chrome.storage.local.get(['targets', 'refs', 'fileType', 'viewMode', 'tableLayout', 'batchSize'], (data) => {
       if (data.targets) targetList.value = data.targets;
       if (data.refs) refList.value = data.refs;
       if (data.fileType) fileTypeSel.value = data.fileType;
       if (data.viewMode) viewModeSel.value = data.viewMode;
+      if (data.tableLayout) tableLayoutSel.value = data.tableLayout;
       if (data.batchSize) batchSizeSel.value = data.batchSize;
       updatePlaceholder();
     });
@@ -57,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
   refList.addEventListener('input', saveState);
   fileTypeSel.addEventListener('change', () => { saveState(); updatePlaceholder(); });
   viewModeSel.addEventListener('change', () => { saveState(); renderTable(); });
+  tableLayoutSel.addEventListener('change', () => { saveState(); renderTable(); });
   batchSizeSel.addEventListener('change', saveState);
 
   function escapeHtml(str) {
@@ -288,9 +293,44 @@ document.addEventListener('DOMContentLoaded', () => {
       `<span class="stat-error">Errors: ${errors}</span>`;
   }
 
+  function getGroupedData() {
+    const map = new Map();
+    globalResults.forEach(row => {
+      if (!map.has(row.target)) {
+        map.set(row.target, { owner: row.owner, refs: [] });
+      }
+      const group = map.get(row.target);
+      group.refs.push({ reference: row.reference, status: row.status, details: row.details, isError: row.isError });
+      if (!group.owner && row.owner) group.owner = row.owner;
+    });
+    return map;
+  }
+
+  function getMaxRefCount() {
+    const map = getGroupedData();
+    let max = 0;
+    map.forEach(g => { if (g.refs.length > max) max = g.refs.length; });
+    return max;
+  }
+
   function renderTable() {
-    tableBody.innerHTML = '';
+    const layout = tableLayoutSel.value;
     const onlyErrors = viewModeSel.value === 'errors';
+
+    tableBody.innerHTML = '';
+
+    if (layout === 'grouped') {
+      renderGroupedTable(onlyErrors);
+    } else {
+      renderStandardTable(onlyErrors);
+    }
+
+    updateStats();
+  }
+
+  function renderStandardTable(onlyErrors) {
+    resultsHead.innerHTML = '<tr><th>Target URL</th><th>Reference</th><th>Result</th><th>Details</th><th>Owner</th></tr>';
+
     let visibleCount = 0;
     globalResults.forEach(row => {
       if (onlyErrors && !row.isError) return;
@@ -300,9 +340,49 @@ document.addEventListener('DOMContentLoaded', () => {
       tr.innerHTML = `<td>${escapeHtml(row.target)}</td><td>${escapeHtml(row.reference)}</td><td class="${cls}">${escapeHtml(row.status)}</td><td>${escapeHtml(row.details)}</td><td>${escapeHtml(row.owner)}</td>`;
       tableBody.appendChild(tr);
     });
-    updateStats();
+
     if (globalResults.length > 0) {
       statusText.innerText = onlyErrors ? `Showing ${visibleCount} errors/warnings of ${globalResults.length} total` : `Showing all ${globalResults.length} results`;
+    }
+  }
+
+  function renderGroupedTable(onlyErrors) {
+    const grouped = getGroupedData();
+    const maxRefs = getMaxRefCount();
+
+    let headerHtml = '<tr><th>Target URL</th>';
+    for (let i = 1; i <= maxRefs; i++) {
+      headerHtml += `<th>Reference ${i}</th><th>Result ${i}</th><th>Details ${i}</th>`;
+    }
+    headerHtml += '<th>Owner</th></tr>';
+    resultsHead.innerHTML = headerHtml;
+
+    let visibleCount = 0;
+    grouped.forEach((group, target) => {
+      const hasError = group.refs.some(r => r.isError);
+      if (onlyErrors && !hasError) return;
+      visibleCount++;
+
+      let html = `<td>${escapeHtml(target)}</td>`;
+      for (let i = 0; i < maxRefs; i++) {
+        if (i < group.refs.length) {
+          const r = group.refs[i];
+          const cls = r.status === 'Valid' ? 'status-valid' : r.status === 'Partial' ? 'status-partial' : 'status-error';
+          html += `<td>${escapeHtml(r.reference)}</td><td class="${cls}">${escapeHtml(r.status)}</td><td>${escapeHtml(r.details)}</td>`;
+        } else {
+          html += '<td></td><td></td><td></td>';
+        }
+      }
+      html += `<td>${escapeHtml(group.owner)}</td>`;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = html;
+      tableBody.appendChild(tr);
+    });
+
+    if (globalResults.length > 0) {
+      const totalTargets = grouped.size;
+      statusText.innerText = onlyErrors ? `Showing ${visibleCount} of ${totalTargets} targets (errors/warnings only)` : `Showing all ${totalTargets} targets (${globalResults.length} checks)`;
     }
   }
 
@@ -380,10 +460,51 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   downloadBtn.addEventListener('click', () => {
+    const layout = tableLayoutSel.value;
+
+    if (layout === 'grouped') {
+      downloadGroupedCSV();
+    } else {
+      downloadStandardCSV();
+    }
+  });
+
+  function downloadStandardCSV() {
     let csv = '\uFEFFTarget,Reference,Status,Details,Owner\n';
     globalResults.forEach(r => {
       csv += `${escapeCSV(r.target)},${escapeCSV(r.reference)},${escapeCSV(r.status)},${escapeCSV(r.details)},${escapeCSV(r.owner)}\n`;
     });
+    downloadBlob(csv);
+  }
+
+  function downloadGroupedCSV() {
+    const grouped = getGroupedData();
+    const maxRefs = getMaxRefCount();
+
+    let header = '\uFEFFTarget';
+    for (let i = 1; i <= maxRefs; i++) {
+      header += `,Reference ${i},Status ${i},Details ${i}`;
+    }
+    header += ',Owner\n';
+
+    let csv = header;
+    grouped.forEach((group, target) => {
+      let line = escapeCSV(target);
+      for (let i = 0; i < maxRefs; i++) {
+        if (i < group.refs.length) {
+          const r = group.refs[i];
+          line += `,${escapeCSV(r.reference)},${escapeCSV(r.status)},${escapeCSV(r.details)}`;
+        } else {
+          line += ',,,';
+        }
+      }
+      line += `,${escapeCSV(group.owner)}`;
+      csv += line + '\n';
+    });
+    downloadBlob(csv);
+  }
+
+  function downloadBlob(csv) {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -391,19 +512,59 @@ document.addEventListener('DOMContentLoaded', () => {
     a.download = `adstxt_report_${new Date().toISOString().slice(0, 10)}_${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  });
+  }
 
   copyBtn.addEventListener('click', () => {
-    const lines = ['Target\tReference\tStatus\tDetails\tOwner'];
-    globalResults.forEach(r => {
-      lines.push(`${r.target}\t${r.reference}\t${r.status}\t${r.details}\t${r.owner}`);
-    });
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    const layout = tableLayoutSel.value;
+    let text = '';
+
+    if (layout === 'grouped') {
+      text = copyGroupedText();
+    } else {
+      text = copyStandardText();
+    }
+
+    navigator.clipboard.writeText(text).then(() => {
       const orig = copyBtn.textContent;
       copyBtn.textContent = 'Copied!';
       setTimeout(() => { copyBtn.textContent = orig; }, 1500);
     });
   });
+
+  function copyStandardText() {
+    const lines = ['Target\tReference\tStatus\tDetails\tOwner'];
+    globalResults.forEach(r => {
+      lines.push(`${r.target}\t${r.reference}\t${r.status}\t${r.details}\t${r.owner}`);
+    });
+    return lines.join('\n');
+  }
+
+  function copyGroupedText() {
+    const grouped = getGroupedData();
+    const maxRefs = getMaxRefCount();
+
+    let header = 'Target';
+    for (let i = 1; i <= maxRefs; i++) {
+      header += `\tReference ${i}\tStatus ${i}\tDetails ${i}`;
+    }
+    header += '\tOwner';
+
+    const lines = [header];
+    grouped.forEach((group, target) => {
+      let line = target;
+      for (let i = 0; i < maxRefs; i++) {
+        if (i < group.refs.length) {
+          const r = group.refs[i];
+          line += `\t${r.reference}\t${r.status}\t${r.details}`;
+        } else {
+          line += '\t\t\t';
+        }
+      }
+      line += `\t${group.owner}`;
+      lines.push(line);
+    });
+    return lines.join('\n');
+  }
 
   viewModeSel.addEventListener('change', renderTable);
 });

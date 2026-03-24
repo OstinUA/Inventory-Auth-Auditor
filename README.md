@@ -2,7 +2,7 @@
 
 **High-signal Chrome extension for AdOps teams to validate `ads.txt` and `app-ads.txt` lines at scale with resilient network handling and audit-ready exports.**
 
-[![Version](https://img.shields.io/badge/version-1.3.0-1f6feb?style=for-the-badge)](manifest.json)
+[![Version](https://img.shields.io/badge/version-1.4.0-1f6feb?style=for-the-badge)](manifest.json)
 [![Platform](https://img.shields.io/badge/platform-Chrome%20Extension-34a853?style=for-the-badge&logo=googlechrome&logoColor=white)](manifest.json)
 [![Manifest](https://img.shields.io/badge/manifest-v3-ff9800?style=for-the-badge)](manifest.json)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge)](LICENSE)
