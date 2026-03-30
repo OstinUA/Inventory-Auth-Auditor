@@ -1,21 +1,23 @@
-# Ads.txt / App-ads.txt Line Valid-checker
+# Inventory Auth Auditor
 
-**High-signal Chrome extension for AdOps teams to validate `ads.txt` and `app-ads.txt` lines at scale with resilient network handling and audit-ready exports.**
+Enterprise-grade Chrome extension for high-volume `ads.txt` / `app-ads.txt` authorization auditing with resilient fetch logic, deterministic line matching, and export-ready operational reporting.
 
-[![Version](https://img.shields.io/badge/version-1.4.0-1f6feb?style=for-the-badge)](manifest.json)
-[![Platform](https://img.shields.io/badge/platform-Chrome%20Extension-34a853?style=for-the-badge&logo=googlechrome&logoColor=white)](manifest.json)
+[![Version](https://img.shields.io/badge/version-1.5.0-1f6feb?style=for-the-badge)](manifest.json)
+[![Build](https://img.shields.io/badge/build-manual%20verified-2ea44f?style=for-the-badge)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-manual%20checklist-orange?style=for-the-badge)](#testing)
 [![Manifest](https://img.shields.io/badge/manifest-v3-ff9800?style=for-the-badge)](manifest.json)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge)](LICENSE)
-[![Status](https://img.shields.io/badge/status-active%20development-8a2be2?style=for-the-badge)](#)
 
 > [!IMPORTANT]
-> This tool does **line-level semantic validation**, not just file existence checks. It verifies partner domain, publisher ID, and relationship type (`DIRECT` / `RESELLER`) against your reference set.
+> This project performs semantic, line-level inventory authorization validation, not simple file-presence checks.
 
 ## Table of Contents
 
+- [Title and Description](#inventory-auth-auditor)
+- [Table of Contents](#table-of-contents)
 - [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Technical Notes](#technical-notes)
+- [Tech Stack & Architecture](#tech-stack--architecture)
+  - [Core Stack](#core-stack)
   - [Project Structure](#project-structure)
   - [Key Design Decisions](#key-design-decisions)
 - [Getting Started](#getting-started)
@@ -26,193 +28,280 @@
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [License](#license)
-- [Contacts and Support](#contacts-and-support)
+- [Contacts & Community Support](#contacts--community-support)
 
 ## Features
 
-- **Bulk domain processing** with configurable batch size (`2`, `5`, `10`, `20`) for balancing speed and reliability.
-- **Dual-file mode**: supports both `ads.txt` and `app-ads.txt` validation flows.
-- **Reference-aware parsing**:
-  - Validates `(domain, publisher-id, account-type)` tuples.
-  - Detects partial matches (for example, when ID matches but account type is wrong).
-- **Resilient fetch pipeline**:
-  - Attempts secure and fallback protocols when needed.
-  - Retries transient failures.
-  - Detects soft-404 responses (HTML/JSON/XML payloads masquerading as text endpoints).
-- **Data hygiene and normalization**:
-  - Strips comments and zero-width chars.
-  - Normalizes casing for deterministic comparisons.
-  - Identifies duplicate logical records in target files.
-- **Operational visibility**:
-  - Progress bar, status line, and per-status counters (`Valid`, `Partial`, `Missing`, `Error`).
-  - Filter mode for showing only warnings/errors.
-- **Report tooling**:
-  - CSV export.
-  - Clipboard copy for quick ticketing or Slack handoff.
-- **Metadata extraction**: surfaces optional `OWNERDOMAIN` and `MANAGERDOMAIN` hints in the result set.
+- High-throughput validation engine for `ads.txt`, `app-ads.txt`, and direct URL mode.
+- Batch-based parallel execution with configurable concurrency control (`1`–`5` targets per batch).
+- Deterministic tuple validation against reference rows (`domain`, `publisher-id`, `account-type`).
+- Partial-match diagnostics for account type mismatch detection.
+- Dual protocol retrieval strategy (`https://` fallback to `http://`) for resilience across heterogeneous publisher infrastructure.
+- Retry-enabled fetch with timeout control and transient-failure backoff.
+- Soft-404 detection to reject HTML/JSON/XML responses masquerading as text inventory files.
+- Input normalization pipeline:
+  - strips comments,
+  - removes zero-width characters,
+  - normalizes case,
+  - supports optional `TAG-ID` parsing.
+- Duplicate logical-line detection in target files.
+- Metadata enrichment for `OWNERDOMAIN` and `MANAGERDOMAIN`.
+- Two reporting layouts:
+  - `Standard` (row-level reference checks),
+  - `Grouped by Target` (target-centric matrix output).
+- Triage-first filtering mode (`Errors / Warnings Only`).
+- In-session and persistent UX state via `chrome.storage.local`.
+- Export and handoff tooling:
+  - CSV generation,
+  - clipboard copy (tab-delimited).
+- Progress instrumentation with elapsed-time and per-status counters (`Valid`, `Partial`, `Missing`, `Error`).
 
 > [!TIP]
-> If your domain list is huge, start with smaller batch sizes to reduce false negatives from temporary network jitter.
+> Start with smaller batch sizes when auditing unstable domains to reduce temporary network-noise false negatives.
 
-## Tech Stack
+## Tech Stack & Architecture
 
-- **Runtime / Platform**: Chrome Extension (`Manifest V3`).
-- **Frontend**: Vanilla JavaScript, HTML, CSS.
-- **Background execution**: Service Worker (`background.js`) for extension window bootstrap.
-- **Storage**: `chrome.storage.local` for persistent UI/session state.
-- **Permissions model**:
-  - `storage`
-  - broad `host_permissions` (`http://*/*`, `https://*/*`) for cross-domain validation checks.
+### Core Stack
 
-## Technical Notes
+- Platform: Chrome Extension, Manifest V3.
+- Language: Vanilla JavaScript (ES2017+), HTML5, CSS3.
+- Runtime primitives:
+  - Extension service worker (`background.js`),
+  - popup UI runtime (`popup.html` + `popup.js`),
+  - browser storage API (`chrome.storage.local`).
+- Security and access model:
+  - permission: `storage`,
+  - host permissions: `http://*/*`, `https://*/*`.
 
 ### Project Structure
 
 ```text
 .
-├── manifest.json      # Extension metadata, permissions, entry points
-├── background.js      # Opens popup in dedicated extension window
-├── popup.html         # Main UI layout
-├── popup.js           # Validation engine, parsing, rendering, export logic
-├── style.css          # UI styles
+├── background.js
+├── popup.html
+├── popup.js
+├── style.css
+├── manifest.json
+├── LICENSE
+├── CONTRIBUTING.md
+├── README.md
 ├── icons/
-│   └── icon128.png    # Extension icon
-└── LICENSE
+│   └── icon128.png
+└── trigger action/
+    └── trigger_action.py
 ```
 
 ### Key Design Decisions
 
-1. **Single-screen ops UX**: inputs, run controls, progress, and report grid are colocated for fast repetitive workflows.
-2. **Protocol fallback strategy**: the validator can recover when HTTPS endpoint behavior differs from HTTP endpoint behavior.
-3. **Soft-404 heuristics**: prevents accidentally accepting HTML error pages as valid ads inventory declarations.
-4. **Normalized comparison pipeline**: avoids false mismatches caused by casing, comments, or hidden unicode characters.
-5. **Error-first filtering**: high-signal mode for triage-heavy audits and campaign onboarding checks.
+1. Extension-first architecture for zero-dependency operator usage and immediate browser-side execution.
+2. Stateful operator UX to preserve audit context between sessions without backend infrastructure.
+3. Reference-driven semantic validation rather than regex-only presence matching.
+4. Soft-404 guarding to prevent false positives from CDN/WAF error pages.
+5. Output symmetry between on-screen tables and export formats for incident workflows.
+
+#### Validation Pipeline (Mermaid)
+
+```mermaid
+flowchart TD
+    A[Operator inputs targets and references] --> B[Normalize and parse reference tuples]
+    B --> C{File mode}
+    C -->|ads.txt or app-ads.txt| D[Build domain endpoint URL]
+    C -->|direct URL| E[Normalize input URL]
+    D --> F[Fetch with retry and timeout]
+    E --> F
+    F --> G{HTTPS success?}
+    G -->|No| H[HTTP fallback attempt]
+    G -->|Yes| I[Read text payload]
+    H --> I
+    I --> J{Soft-404 or non-text?}
+    J -->|Yes| K[Mark Error result rows]
+    J -->|No| L[Parse target lines and metadata]
+    L --> M[Match references and classify status]
+    M --> N[Render table and update counters]
+    N --> O[Export CSV or copy report]
+    K --> N
+```
 
 > [!NOTE]
-> This repository is intentionally lightweight and dependency-free. There is no Node/Python runtime requirement for normal usage.
+> The extension is intentionally dependency-free; no Node.js build chain is required for standard operation.
 
 ## Getting Started
 
 ### Prerequisites
 
-- **Google Chrome** (current stable recommended).
+- Google Chrome (current stable channel recommended).
 - Local filesystem access to load an unpacked extension.
-- Optional: Git for cloning and syncing updates.
+- Git CLI (optional but recommended for updates and contribution workflows).
 
 ### Installation
 
 ```bash
-# 1) Clone the repository
-git clone https://github.com/<your-org>/Ads.txt-App-ads.txt-line-Valid-checker.git
-cd Ads.txt-App-ads.txt-line-Valid-checker
+# 1) Clone repository
+git clone https://github.com/<your-org>/Inventory-Auth-Auditor.git
+cd Inventory-Auth-Auditor
 
 # 2) Open Chrome extension manager
-# Navigate to: chrome://extensions/
+# URL: chrome://extensions/
 
 # 3) Enable "Developer mode"
-# 4) Click "Load unpacked"
-# 5) Select this repository folder
+
+# 4) Click "Load unpacked" and select the project root
 ```
 
-After loading, click the extension action icon to open the validator window.
+After loading, click the extension action icon to launch the auditor window.
 
 ## Testing
 
-This project currently has no formal automated test suite, but you can run robust manual validation checks.
+The repository currently does not ship an automated test harness; use the operational verification flow below.
 
-### Functional smoke test
+### Manual Functional Validation
 
 ```text
-1. Load extension in Developer mode.
-2. Set File Type to ads.txt.
-3. Add 2-3 known domains with known-good reference lines.
-4. Click Start Validation.
-5. Verify status counters and table rows are coherent.
-6. Export CSV and verify output integrity.
+1) Load extension in Developer mode.
+2) Choose File Type: ads.txt or app-ads.txt.
+3) Paste 2-5 known domains and valid reference tuples.
+4) Run validation and confirm progress + counters.
+5) Confirm at least one Valid and one Missing/Partial path.
+6) Export CSV and verify column integrity.
+7) Toggle Grouped layout and Errors-only filter.
+8) Test Stop control during an active run.
 ```
 
-### Regression checklist
+### Suggested Local Quality Commands
 
-- Verify `Errors / Warnings Only` hides valid rows.
-- Verify `Stop` interrupts active run.
-- Verify state persistence after closing/reopening extension window.
-- Verify duplicate detection annotation in details column.
-- Verify owner/manager metadata extraction when available.
+```bash
+# Validate extension manifest structure
+python -m json.tool manifest.json > /dev/null
+
+# Quick JavaScript syntax check (if Node.js is available)
+node --check popup.js
+node --check background.js
+```
 
 > [!WARNING]
-> Network behavior varies across targets (redirects, bot protection, WAFs). Treat isolated `Connection Error` results as potentially transient and re-run before escalating.
+> Cross-domain inventory endpoints may produce transient `Connection Error` states; rerun suspect targets before escalation.
 
 ## Deployment
 
-Since this is a Chrome extension, “deployment” usually means one of two flows:
+### Internal Team Rollout (Unpacked)
 
-### Internal/Team deployment (fast path)
+1. Commit and push validated changes.
+2. Team members pull latest branch.
+3. Open `chrome://extensions/` and click `Reload` for the extension.
 
-1. Keep extension unpacked in a shared repository.
-2. Team members pull latest changes.
-3. Reload extension in `chrome://extensions/`.
-
-### Release packaging (distribution path)
+### Artifact Packaging
 
 ```bash
-# from repository root
 zip -r release.zip manifest.json background.js popup.html popup.js style.css icons LICENSE README.md CONTRIBUTING.md
 ```
 
-Then upload package through your distribution channel (for example, private enterprise policy or Chrome Web Store pipeline).
+### CI/CD Integration Guidance
+
+- Add a lightweight pipeline that:
+  - validates JSON manifest syntax,
+  - performs JavaScript parse checks,
+  - packages distributable zip artifact.
+- Gate release tags on successful validation steps.
+- Keep host permissions review in release checklist.
 
 > [!CAUTION]
-> Validate permissions and host access scope before publishing externally.
+> The declared host permissions are intentionally broad for cross-domain auditing; validate policy expectations before public store publication.
 
 ## Usage
 
-### Minimal workflow
+### Example 1: Domain Mode (`ads.txt`)
 
 ```text
-# Target Websites (left textarea)
+# Target Websites
 example.com
 news-site.tld
 appvendor.tld
 
-# Reference Lines (right textarea)
+# Reference Lines
 google.com, pub-1234567890, DIRECT
 appnexus.com, 98765, RESELLER
 ```
 
-### Operator runbook
+### Example 2: Direct URL Mode (`url`)
 
 ```text
-1) Pick file mode: ads.txt or app-ads.txt
-2) Choose view mode: all results or errors-only
-3) Tune batch size for your network conditions
-4) Start validation and monitor progress/stats
-5) Export CSV or copy output into incident/task tracker
+# Target URLs (direct links)
+https://publisher-a.com/app-ads.txt
+https://publisher-b.net/ads.txt
+publisher-c.org/app-ads.txt
+
+# Reference Lines
+google.com, pub-1234567890, DIRECT
+rubiconproject.com, 998877, RESELLER
+```
+
+### JavaScript Usage Pattern (Core Matching Semantics)
+
+```js
+// Input references are normalized into deterministic tuples.
+const references = rawRefs
+  .map((line) => line.split(',').map((v) => v.trim()))
+  .filter((parts) => parts.length >= 2)
+  .map(([domain, id, type]) => ({
+    domain: domain.toLowerCase(),
+    id: id.toLowerCase(),
+    type: type ? type.toUpperCase().replace(/[^A-Z]/g, '') : null,
+  }));
+
+// Target file lines are normalized similarly before comparison.
+const normalizedTargetLines = content
+  .split('\n')
+  .map((line) => line.split('#')[0].trim())
+  .filter(Boolean)
+  .map((line) => line.split(',').map((v) => v.trim()));
+
+// Matching is tuple-based: domain + id, then optional type validation.
 ```
 
 ## Configuration
 
-This extension does not use a `.env` file.
+The extension is configured at runtime through the UI and persisted in `chrome.storage.local`.
 
-Runtime configuration is done in the UI and persisted via `chrome.storage.local`:
+### Stored Keys
 
-- `fileType`: target file type (`ads.txt` or `app-ads.txt`).
-- `viewMode`: result filtering mode (`all` or `errors`).
-- `batchSize`: concurrency level for domain processing.
-- `targets`: multiline domain input.
-- `refs`: multiline reference tuples.
+- `targets`: multiline target domain or URL list.
+- `refs`: multiline reference entries.
+- `fileType`: `ads.txt`, `app-ads.txt`, or `url`.
+- `viewMode`: `all` or `errors`.
+- `tableLayout`: `standard` or `grouped`.
+- `batchSize`: stringified integer (`1`–`5`).
+
+### Environment Variables and Startup Flags
+
+- `.env`: not used.
+- CLI startup flags: not required for default usage.
+- Runtime host access is controlled by `manifest.json` permissions.
+
+### Configuration File Structure
+
+Primary static config is defined in `manifest.json`:
+
+```json
+{
+  "manifest_version": 3,
+  "name": "Inventory Auth Auditor",
+  "version": "1.5.0",
+  "permissions": ["storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" }
+}
+```
 
 > [!NOTE]
-> Persisted values are local to each browser profile.
+> Persisted configuration is scoped to the local Chrome profile where the extension is installed.
 
 ## License
 
-Distributed under the `GPL-3.0` License. See [`LICENSE`](LICENSE) for the full legal text.
+This project is distributed under the `GPL-3.0` License. See [`LICENSE`](LICENSE) for full terms.
 
-## Contacts and Support
+## Contacts & Community Support
 
-## ❤️ Support the Project
-
-If you find this tool useful, consider leaving a ⭐ on GitHub or supporting the author directly:
+## Support the Project
 
 [![Patreon](https://img.shields.io/badge/Patreon-OstinFCT-f96854?style=flat-square&logo=patreon)](https://www.patreon.com/OstinFCT)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-fctostin-29abe0?style=flat-square&logo=ko-fi)](https://ko-fi.com/fctostin)
@@ -220,4 +309,4 @@ If you find this tool useful, consider leaving a ⭐ on GitHub or supporting the
 [![YouTube](https://img.shields.io/badge/YouTube-FCT--Ostin-red?style=flat-square&logo=youtube)](https://www.youtube.com/@FCT-Ostin)
 [![Telegram](https://img.shields.io/badge/Telegram-FCTostin-2ca5e0?style=flat-square&logo=telegram)](https://t.me/FCTostin)
 
-For project maintenance topics, use repository Issues/PRs. For questions on usage patterns and audit workflows, prefer Discussions if enabled.
+If you find this tool useful, consider leaving a star on GitHub or supporting the author directly.
