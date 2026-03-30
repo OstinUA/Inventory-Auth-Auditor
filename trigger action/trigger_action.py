@@ -1,9 +1,20 @@
 """Create GitHub issues and optional PR comments from model analysis.
 
-This script runs in GitHub Actions for push and pull_request events.
-It collects a diff, sends it to the configured model, and creates an issue
-from the structured response. For pull requests, it also posts a short
-summary comment back to the PR.
+This module executes inside GitHub Actions for ``push`` and
+``pull_request`` events. It gathers event context and diff text, routes the
+prompt based on labels, submits the prompt to a hosted model endpoint, and
+creates a GitHub issue from the model's structured JSON response. For pull
+request events, it also posts a concise summary comment to the originating PR.
+
+Environment Variables:
+    GITHUB_TOKEN: GitHub token used by PyGithub for repository API calls.
+    GH_MODELS_TOKEN: Bearer token for the hosted model inference endpoint.
+    REPOSITORY: Repository identifier in ``owner/repo`` format.
+    EVENT_NAME: GitHub Actions event name, expected to be ``push`` or
+        ``pull_request``.
+    ALLOWED_USER: Comma-separated allowlist of GitHub usernames.
+    COMMIT_SHA: Commit SHA for push events.
+    PR_NUMBER: Pull request number for pull_request events.
 """
 
 import os
@@ -105,7 +116,25 @@ for issue in repo.get_issues(state="all"):
 
 
 def was_already_closed(title_keyword: str) -> bool:
-    """Return True when a similar closed issue title already exists."""
+    """Check whether a similar closed issue already exists.
+
+    The comparison is case-insensitive and uses substring matching against
+    closed issue titles. This is used as a secondary deduplication step to
+    avoid reopening findings that maintainers have intentionally closed.
+
+    Args:
+        title_keyword (str): Case-insensitive title fragment used to search
+            closed issues. Callers typically pass a normalized prefix of the
+            proposed issue title.
+
+    Returns:
+        bool: ``True`` when at least one closed issue title contains
+        ``title_keyword``; otherwise ``False``.
+
+    Examples:
+        >>> was_already_closed("sql injection in login")
+        False
+    """
     for issue in repo.get_issues(state="closed"):
         if title_keyword.lower() in (issue.title or "").lower():
             print(f"Similar closed issue found: #{issue.number} — skipping.")
@@ -114,7 +143,23 @@ def was_already_closed(title_keyword: str) -> bool:
 
 
 def build_permalink(filename: str, line: int = 1) -> str:
-    """Build a GitHub permalink for a file path and line number."""
+    """Build a GitHub permalink for a file path and line number.
+
+    The function prefers ``COMMIT_SHA`` when available. In pull-request
+    contexts where that value is empty, it falls back to the PR head SHA.
+
+    Args:
+        filename (str): Repository-relative file path to link.
+        line (int, optional): One-based line number anchor. Defaults to ``1``.
+
+    Returns:
+        str: Fully qualified GitHub URL in the format
+        ``https://github.com/<owner>/<repo>/blob/<sha>/<file>#L<line>``.
+
+    Examples:
+        >>> build_permalink("src/main.py", 42)
+        'https://github.com/<owner>/<repo>/blob/<sha>/src/main.py#L42'
+    """
     sha = os.environ.get("COMMIT_SHA") or ""
     # Fall back to PR head SHA when running from a pull_request event.
     if not sha and pr_ref:
@@ -174,7 +219,33 @@ Changes: {diff_text}
 
 
 def call_model(prompt: str, retries: int = 3, delay: int = 5) -> dict:
-    """Call the model endpoint and parse the JSON response."""
+    """Call the hosted model endpoint and parse the JSON response.
+
+    The request is retried on any exception up to ``retries`` times. Response
+    content is normalized by removing markdown code fences before JSON parsing.
+    If all attempts fail, the process exits gracefully with code ``0`` so the
+    workflow does not fail hard.
+
+    Args:
+        prompt (str): Fully rendered prompt text sent as the user message.
+        retries (int, optional): Maximum number of request attempts before
+            giving up. Defaults to ``3``.
+        delay (int, optional): Delay in seconds between failed attempts.
+            Defaults to ``5``.
+
+    Returns:
+        dict: Parsed JSON object returned by the model. Expected keys include
+        ``issue_title``, ``severity``, ``issue_body``, ``labels``,
+        ``affected_file``, ``affected_line``, and ``summary``.
+
+    Raises:
+        SystemExit: Raised via ``exit(0)`` after retry exhaustion.
+
+    Examples:
+        >>> result = call_model("Summarize this diff", retries=1, delay=0)
+        >>> isinstance(result, dict)
+        True
+    """
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {model_token}"
