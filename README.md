@@ -2,6 +2,9 @@
 
 Enterprise-grade Chrome extension for high-volume `ads.txt` / `app-ads.txt` authorization auditing with resilient fetch logic, deterministic line matching, and export-ready operational reporting.
 
+[![Chrome Store](https://img.shields.io/badge/platform-Chrome_Extension-4285F4?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/search/OstinUA)
+[![Chrome Portfolio](https://img.shields.io/badge/Chrome_Web_Store-Portfolio-34A853?style=for-the-badge&logo=google-chrome&logoColor=white)](https://ostinua.github.io/Chrome-Web-Store_Developer-List/)
+
 [![Version](https://img.shields.io/badge/version-1.5.0-1f6feb?style=for-the-badge)](manifest.json)
 [![Build](https://img.shields.io/badge/build-manual%20verified-2ea44f?style=for-the-badge)](#testing)
 [![Coverage](https://img.shields.io/badge/coverage-manual%20checklist-orange?style=for-the-badge)](#testing)
